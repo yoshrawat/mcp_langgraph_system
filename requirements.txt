@@ -1,10 +1,15 @@
 fastapi
 uvicorn
 langchain
+langchain-ollama
 langgraph
+langchain_text_splitters
 ollama
 prometheus-client
 requests
 httpx
 SQLAlchemy
 pydantic
+streamlit
+chromadb
+langchain_community

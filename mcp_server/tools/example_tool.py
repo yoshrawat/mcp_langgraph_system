@@ -1,1 +1,0 @@
-# Example MCP tool stub

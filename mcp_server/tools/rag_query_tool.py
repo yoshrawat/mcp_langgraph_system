@@ -2,8 +2,7 @@ from typing import List, Dict, Any
 
 from langchain_ollama import OllamaEmbeddings
 
-from ..vectorstore.chroma_store import get_chroma
-
+from ..vector_store.chroma_store import get_chroma
 
 # Shared embedding model (same space as index)
 _embeddings = OllamaEmbeddings(model="nomic-embed-text")

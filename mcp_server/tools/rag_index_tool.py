@@ -3,7 +3,7 @@ from typing import List, Dict
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_ollama import OllamaEmbeddings
 
-from ..vectorstore.chroma_store import get_chroma
+from ..vector_store.chroma_store import get_chroma
 
 
 # Embedding model (shared)

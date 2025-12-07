@@ -1,4 +1,4 @@
-from mcp.server import Server
+from mcp_server.server import Server
 
 # Import tools
 from .tools.health_tool import health_tool
