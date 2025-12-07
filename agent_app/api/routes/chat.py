@@ -16,7 +16,7 @@ SESSION_STORE = {}
 # Shared global agent instance
 AGENT = AgentGraph(
     mcp_endpoint="python mcp_server/run_server.py",
-    model="llama3"
+    model="llama3.2:latest"
 )
 
 

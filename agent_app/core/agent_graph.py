@@ -25,7 +25,7 @@ class AgentGraph:
     def __init__(
         self,
         mcp_endpoint: str = "python mcp_server/run_server.py",
-        model: str = "llama3"
+        model: str = "llama3.2:latest"
     ):
         # Instantiate nodes
         self.router = RouterNode()

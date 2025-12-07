@@ -39,7 +39,7 @@ SESSION_STORE = {}
 # Create a single agent instance for all API calls
 AGENT = AgentGraph(
     mcp_endpoint="python mcp_server/run_server.py",
-    model="llama3"
+    model="llama3.2:latest"
 )
 
 
@@ -101,8 +101,17 @@ async def mcp_list_tools():
     Simple debugging endpoint to ask MCP server for its tool list.
     Useful for Postman or CI-based validation.
     """
-    from langchain_mcp_adapters.client import MCPClient
+    from langchain_mcp_adapters.client import load_mcp_tools, create_session
+    from langchain_mcp_adapters.sessions import StdioConnection
 
-    async with MCPClient.from_stdio("python mcp_server/run_server.py") as client:
-        result = await client.list_tools()
-        return result
+    connection: StdioConnection = {
+        "transport": "stdio",
+        "command": "python",
+        "args": ["-m", "mcp_server.run_server"],
+    }
+
+    async for session in create_session(connection):
+        tools = await load_mcp_tools(session, connection=connection)
+        return {
+            "tools": [{"name": tool.name, "description": tool.description} for tool in tools]
+        }

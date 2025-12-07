@@ -18,7 +18,7 @@ class LLMNode:
       - Writes the final LLM output into state.final_response
     """
 
-    def __init__(self, model: str = "llama3"):
+    def __init__(self, model: str = "llama3.2:latest"):
         self.llm = ChatOllama(
             model=model,
             temperature=0.2,

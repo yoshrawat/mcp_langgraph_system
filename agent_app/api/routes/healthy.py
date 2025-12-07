@@ -23,7 +23,7 @@ async def readiness_check():
         # Create lightweight agent instance
         agent = AgentGraph(
             mcp_endpoint="python mcp_server/run_server.py",
-            model="llama3"
+            model="llama3.2:latest"
         )
 
         # Try listing MCP tools (fast)

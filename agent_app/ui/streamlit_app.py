@@ -23,7 +23,7 @@ st.title("🤖 MCP-Powered LangGraph Assistant")
 if "agent" not in st.session_state:
     st.session_state.agent = AgentGraph(
         mcp_endpoint="python mcp_server/run_server.py",
-        model="llama3"
+        model="llama3.2:latest"
     )
 
 if "session_id" not in st.session_state:

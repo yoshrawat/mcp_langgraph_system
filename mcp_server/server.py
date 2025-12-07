@@ -28,7 +28,7 @@ async def health_check():
 @mcp.tool()
 async def fetch_api_data(url: str) -> str:
     """Fetch JSON from any public API endpoint."""
-    from mcp_server.tools.api_fetch_tool import FetchAPIDataInput
+    from .tools.api_fetch_tool import FetchAPIDataInput
     return await fetch_api_data_tool(input=FetchAPIDataInput(url=url))
 
 
@@ -38,7 +38,7 @@ async def fetch_api_data(url: str) -> str:
 @mcp.tool()
 async def rag_index(texts: list, metadatas: list = None, namespace: str = "default") -> dict:
     """Index text into ChromaDB for retrieval."""
-    from mcp_server.tools.rag_index_tool import RAGIndexInput
+    from .tools.rag_index_tool import RAGIndexInput
     result = await rag_index_tool(input=RAGIndexInput(
         texts=texts,
         metadatas=metadatas,
@@ -53,7 +53,7 @@ async def rag_index(texts: list, metadatas: list = None, namespace: str = "defau
 @mcp.tool()
 async def rag_query(query: str, namespace: str = "default", k: int = 5) -> dict:
     """Query embeddings from ChromaDB."""
-    from mcp_server.tools.rag_query_tool import RAGQueryInput
+    from .tools.rag_query_tool import RAGQueryInput
     result = await rag_query_tool(input=RAGQueryInput(
         query=query,
         namespace=namespace,
@@ -68,10 +68,13 @@ async def start_server_stdio():
     This is required for LangGraph's MCPClient.from_stdio().
     """
     print("[MCP] Server starting on STDIO...")
-    await mcp.run_stdio_async()
+    # await mcp.run_stdio_async()
+    await mcp.run_streamable_http_async()
+    # mcp.run(transport="streamable-http")
     print("[MCP] Server stopped.")
 
 
 def run():
     """Entry point for synchronous startup."""
     asyncio.run(start_server_stdio())
+    # start_server_stdio()
