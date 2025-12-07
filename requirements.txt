@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+langchain
+langgraph
+ollama
+prometheus-client
+requests
+httpx
+SQLAlchemy
+pydantic

@@ -1,0 +1,24 @@
+{
+  "title": "MCP Tools Monitoring",
+  "panels": [
+    {
+      "type": "graph",
+      "title": "Tool Call Count (by tool)",
+      "targets": [
+        {
+          "expr": "tool_calls_total"
+        }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Tool Error Count",
+      "targets": [
+        {
+          "expr": "tool_errors_total"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 36
+}

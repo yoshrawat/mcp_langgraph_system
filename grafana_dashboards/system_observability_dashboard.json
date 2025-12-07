@@ -1,0 +1,24 @@
+{
+  "title": "System Observability",
+  "panels": [
+    {
+      "type": "graph",
+      "title": "API Request Latency",
+      "targets": [
+        {
+          "expr": "api_request_duration_seconds"
+        }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "API Request Count",
+      "targets": [
+        {
+          "expr": "api_requests_total"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 36
+}
