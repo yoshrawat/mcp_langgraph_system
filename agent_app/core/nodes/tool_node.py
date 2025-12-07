@@ -2,7 +2,7 @@ from typing import Optional
 from ..state import AgentState
 
 
-class RouterNode:
+class ToolNode:
     """
     Router node decides the next step for the agent:
       - "tool" → if user asks to search, fetch, query, or index
