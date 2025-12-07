@@ -13,3 +13,5 @@ pydantic
 streamlit
 chromadb
 langchain_community
+mcp
+mcp-cli

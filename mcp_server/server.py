@@ -1,53 +1,75 @@
-from mcp_server.server import Server
+import asyncio
+from mcp.server import Server
+from mcp.types import Tool, ToolOutput
 
-# Import tools
-from .tools.health_tool import health_tool
-from .tools.api_fetch_tool import api_fetch_tool
-from .tools.rag_index_tool import rag_index_tool
-from .tools.rag_query_tool import rag_query_tool
+# Import tool implementations
+from mcp_server.tools.health_tool import health_check_tool
+from mcp_server.tools.api_fetch_tool import fetch_api_data_tool
+from mcp_server.tools.rag_index_tool import rag_index_tool
+from mcp_server.tools.rag_query_tool import rag_query_tool
 
 
-def build_mcp_server() -> Server:
+async def start_server_stdio():
     """
-    Construct the MCP server with all registered tools.
-
-    This server exposes:
-      - health_check
-      - fetch_api_data
-      - rag_index
-      - rag_query
-
-    The server is unified (single namespace) following the design choice (A, A).
+    Start MCP server using STDIO transport.
+    This is required for LangGraph's MCPClient.from_stdio().
     """
 
-    server = Server(name="mcp-rag-server")
+    server = Server(name="mcp-langgraph-server")
 
-    # Register health tool
+    # ------------------------------------------------------------------
+    # Register MCP Tools
+    # ------------------------------------------------------------------
     server.register_tool(
-        "health_check",
-        health_tool,
-        description="Check server health status."
+        Tool(
+            name="health_check",
+            description="Returns OK if MCP server is alive.",
+            input_schema=health_check_tool.input_schema(),
+            output_schema=health_check_tool.output_schema(),
+            handler=health_check_tool
+        )
     )
 
-    # Register API fetch tool
     server.register_tool(
-        "fetch_api_data",
-        api_fetch_tool,
-        description="Fetch remote API data and return content."
+        Tool(
+            name="fetch_api_data",
+            description="Fetch JSON from any public API endpoint.",
+            input_schema=fetch_api_data_tool.input_schema(),
+            output_schema=fetch_api_data_tool.output_schema(),
+            handler=fetch_api_data_tool
+        )
     )
 
-    # Register RAG indexer tool
     server.register_tool(
-        "rag_index",
-        rag_index_tool,
-        description="Index documents into ChromaDB using Ollama embeddings."
+        Tool(
+            name="rag_index",
+            description="Index text into ChromaDB for retrieval.",
+            input_schema=rag_index_tool.input_schema(),
+            output_schema=rag_index_tool.output_schema(),
+            handler=rag_index_tool
+        )
     )
 
-    # Register RAG search tool
     server.register_tool(
-        "rag_query",
-        rag_query_tool,
-        description="Search indexed embeddings in ChromaDB."
+        Tool(
+            name="rag_query",
+            description="Query embeddings from ChromaDB.",
+            input_schema=rag_query_tool.input_schema(),
+            output_schema=rag_query_tool.output_schema(),
+            handler=rag_query_tool
+        )
     )
 
-    return server
+    # ------------------------------------------------------------------
+    # Start MCP server over STDIO
+    # ------------------------------------------------------------------
+    print("[MCP] Server starting on STDIO...")
+
+    await server.run_stdio()
+
+    print("[MCP] Server stopped.")
+
+
+def run():
+    """Entry point for synchronous startup."""
+    asyncio.run(start_server_stdio())
