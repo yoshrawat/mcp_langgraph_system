@@ -1,8 +1,8 @@
 from typing import List
 from pydantic import BaseModel, Field
 
-# from mcp_server.vectorstore.chroma_store import ChromaVectorStore
-from mcp_server.vector_store.chroma_store import ChromaVectorStore
+# from .vector_store.chroma_store import ChromaVectorStore
+from ..vector_store.chroma_store import get_chroma
 
 
 # ---------------------------------------------------------
@@ -30,15 +30,17 @@ async def rag_query_tool(input: RAGQueryInput) -> RAGQueryOutput:
     Perform vector similarity search in ChromaDB.
     """
 
-    store = ChromaVectorStore(namespace=input.namespace)
+    store = get_chroma()
 
-    docs = await store.query(
+    docs = store.similarity_search(
         query=input.query,
         k=input.k
     )
 
+    matches = [{"page_content": doc.page_content, "metadata": doc.metadata} for doc in docs]
+
     return RAGQueryOutput(
-        matches=docs,
+        matches=matches,
         namespace=input.namespace,
         query=input.query
     )

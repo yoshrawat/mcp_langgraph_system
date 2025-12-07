@@ -1,8 +1,8 @@
 from typing import Optional, List
 from pydantic import BaseModel, Field
 
-# from mcp_server.vectorstore.chroma_store import ChromaVectorStore
-from mcp_server.vector_store.chroma_store import ChromaVectorStore
+# from .vector_store.chroma_store import ChromaVectorStore
+from ..vector_store.chroma_store import get_chroma
 
 
 # ---------------------------------------------------------
@@ -36,9 +36,10 @@ async def rag_index_tool(input: RAGIndexInput) -> RAGIndexOutput:
     Index text into ChromaDB using Ollama embeddings.
     """
 
-    store = ChromaVectorStore(namespace=input.namespace)
+    store = get_chroma()
 
-    count = await store.add_texts(
+    count = len(input.texts)
+    store.add_texts(
         texts=input.texts,
         metadatas=input.metadatas
     )
