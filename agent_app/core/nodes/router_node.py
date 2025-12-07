@@ -1,56 +1,49 @@
-from typing import Optional
-from ..state import AgentState
+"""
+Router Node for LangGraph Agent
+-------------------------------
+
+This node is responsible for deciding the next step of execution:
+
+- "tool" → when the user input or LLM indicates a tool call
+- "llm"  → when the agent should respond normally
+- "done" → when a final answer already exists
+
+This ensures the agent follows the correct flow of:
+  LLM → Router → Tool → Router → LLM → ... → Done
+"""
+
+from agent_app.core.state import AgentState
 
 
 class RouterNode:
     """
-    Router node decides the next step for the agent:
-      - "tool" → if user asks to search, fetch, query, or index
-      - "llm"  → if the agent should respond naturally
-      - "done" → if final_response already exists
+    Simple intent-based router for LangGraph agent.
     """
 
+    # Keywords that suggest a tool is needed.
     TRIGGER_KEYWORDS = [
         "search", "fetch", "lookup", "query",
         "rag", "index", "tool", "api"
     ]
 
-    def _detect_tool_intent(self, text: str) -> bool:
-        """Return True if query contains any tool-related keywords."""
-        lowered = text.lower()
-        return any(kw in lowered for kw in self.TRIGGER_KEYWORDS)
+    def __call__(self, state: AgentState):
+        """
+        Determine which node should execute next.
+        """
 
-    async def run(self, state: AgentState) -> AgentState:
-        # ------------------------------------------------------------------
-        # If we already have a final response, we are done.
-        # ------------------------------------------------------------------
-        if state.final_response:
-            state.next_step = "done"
-            return state
+        # 1. If final response already exists → conversation finishes.
+        if state.final_response is not None:
+            return {"next": "done"}
 
-        # ------------------------------------------------------------------
-        # Get last user message
-        # ------------------------------------------------------------------
-        if not state.messages:
-            state.next_step = "llm"
-            return state
+        # 2. If LLM decided a tool should be called → send to tool node.
+        if state.pending_tool_call is not None:
+            return {"next": "tools"}
 
-        last_msg = state.messages[-1]
+        # 3. If user typed something that indicates needing a tool.
+        user_input = (state.user_input or "").lower()
 
-        if last_msg.role != "human":
-            state.next_step = "llm"
-            return state
+        if any(keyword in user_input for keyword in self.TRIGGER_KEYWORDS):
+            return {"next": "tools"}
 
-        user_text = last_msg.content
-
-        # ------------------------------------------------------------------
-        # Check if tool is needed
-        # ------------------------------------------------------------------
-        if self._detect_tool_intent(user_text):
-            # Next node: ToolNode
-            state.next_step = "tool"
-        else:
-            # Default: use LLM
-            state.next_step = "llm"
-
-        return state
+        # 4. Otherwise → LLM should continue.
+        return {"next": "llm"}

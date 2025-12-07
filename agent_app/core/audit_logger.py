@@ -1,128 +1,141 @@
+"""
+Audit Logger for MCP Tool Calls
+-------------------------------
+
+This module writes and reads audit logs of tool executions.
+The audit log is stored in SQLite so it persists across sessions.
+
+Each log entry includes:
+ - timestamp
+ - session_id
+ - tool_name
+ - arguments (JSON)
+ - result (JSON)
+"""
+
 import sqlite3
 import json
-from typing import Any, Dict, List, Optional
 from datetime import datetime
+from typing import List, Optional, Dict, Any
+import threading
 import os
 
-DB_PATH = os.path.join(
-    os.path.dirname(__file__),
-    "..",
-    "audit_logs.sqlite3"
-)
+
+DB_PATH = "agent_app/audit_logs.sqlite3"
 
 
-class ToolAuditLogger:
+class AuditLogger:
     """
-    A simple SQLite-based audit logging system that records all MCP tool calls.
-
-    Schema:
-        id INTEGER PRIMARY KEY
-        timestamp TEXT (ISO8601)
-        session_id TEXT
-        tool_name TEXT
-        arguments TEXT (JSON)
-        result TEXT (JSON)
+    Simple thread-safe SQLite audit logger for tool calls.
     """
 
-    def __init__(self, db_path: str = DB_PATH):
-        self.db_path = db_path
-        self._ensure_initialized()
+    _lock = threading.Lock()
 
-    # -----------------------------------
-    # Initialization
-    # -----------------------------------
-    def _ensure_initialized(self):
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+    def __init__(self):
+        self._ensure_db()
 
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("PRAGMA journal_mode=WAL;")
+    # --------------------------------------------------------
+    # Initialize DB
+    # --------------------------------------------------------
 
+    def _ensure_db(self):
+        """
+        Create the SQLite database + table if missing.
+        """
+
+        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+
+        with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS tool_logs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp TEXT NOT NULL,
+                    timestamp TEXT,
                     session_id TEXT,
-                    tool_name TEXT NOT NULL,
+                    tool_name TEXT,
                     arguments TEXT,
                     result TEXT
-                );
+                )
                 """
             )
             conn.commit()
 
-    # -----------------------------------
-    # Logging
-    # -----------------------------------
-    def log(
+    # --------------------------------------------------------
+    # Write a tool log record
+    # --------------------------------------------------------
+
+    def write_record(
         self,
-        session_id: Optional[str],
+        session_id: str,
         tool_name: str,
         arguments: Dict[str, Any],
-        result: Any,
+        result: Any
     ):
-        """Insert a log record into SQLite."""
+        """
+        Store a single tool execution record.
+        """
 
         ts = datetime.utcnow().isoformat()
 
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
-                """
-                INSERT INTO tool_logs (timestamp, session_id, tool_name, arguments, result)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    ts,
-                    session_id,
-                    tool_name,
-                    json.dumps(arguments),
-                    json.dumps(result),
+        with self._lock:  # Ensure thread safety
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO tool_logs (timestamp, session_id, tool_name, arguments, result)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        ts,
+                        session_id,
+                        tool_name,
+                        json.dumps(arguments),
+                        json.dumps(result)
+                    )
                 )
-            )
-            conn.commit()
+                conn.commit()
 
-    # -----------------------------------
-    # Query logs
-    # -----------------------------------
+    # --------------------------------------------------------
+    # Retrieve logs
+    # --------------------------------------------------------
+
     def list_logs(
         self,
         session_id: Optional[str] = None,
         limit: int = 50
     ) -> List[Dict[str, Any]]:
+        """
+        Retrieve up to N logs, optionally filtered by session.
+        """
 
-        query = "SELECT timestamp, session_id, tool_name, arguments, result FROM tool_logs"
-        params = []
+        with self._lock:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.row_factory = sqlite3.Row
 
-        if session_id:
-            query += " WHERE session_id = ?"
-            params.append(session_id)
+                if session_id:
+                    rows = conn.execute(
+                        """
+                        SELECT * FROM tool_logs
+                        WHERE session_id = ?
+                        ORDER BY id DESC
+                        LIMIT ?
+                        """,
+                        (session_id, limit)
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        """
+                        SELECT * FROM tool_logs
+                        ORDER BY id DESC
+                        LIMIT ?
+                        """,
+                        (limit,)
+                    ).fetchall()
 
-        query += " ORDER BY id DESC LIMIT ?"
-        params.append(limit)
-
-        with sqlite3.connect(self.db_path) as conn:
-            rows = conn.execute(query, params).fetchall()
-
-        output = []
-        for ts, sid, tool, args, res in rows:
-            output.append({
-                "timestamp": ts,
-                "session_id": sid,
-                "tool_name": tool,
-                "arguments": json.loads(args) if args else {},
-                "result": json.loads(res) if res else {},
-            })
-
-        return output
-
-    # -----------------------------------
-    # Clear logs (used in tests only)
-    # -----------------------------------
-    def clear(self):
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("DELETE FROM tool_logs;")
-            conn.commit()
+        return [dict(r) for r in rows]
 
 
-# Singleton logger instance
-audit_logger = ToolAuditLogger()
+# --------------------------------------------------------
+# Singleton Instance
+# --------------------------------------------------------
+
+audit_logger = AuditLogger()

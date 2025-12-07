@@ -1,76 +1,140 @@
-from typing import List
-from .state import Message, AgentState
+"""
+Chat History Manager
+--------------------
+
+This module stores and retrieves chat histories
+for all MCP agent sessions.
+
+Why separate from AgentState?
+
+- AgentState is in-memory (per session).
+- History is persistent (across restarts).
+- Follows SOLID: History storage is separate.
+
+Each message stored contains:
+ - session_id
+ - role ("human" | "assistant" | "tool")
+ - content
+ - timestamp
+ - tool_name (optional)
+"""
+
+import sqlite3
+import os
+from datetime import datetime
+from typing import List, Dict, Optional
+
+from agent_app.core.state import AgentMessage
+
+DB_PATH = "agent_app/history.sqlite3"
 
 
-class ConversationHistory:
+class HistoryStore:
     """
-    Simple conversation history handler.
-
-    This manages:
-      - appending human/assistant messages
-      - preserving order
-      - converting into LLM-friendly format
-      - synchronizing with AgentState
+    SQLite-backed history store for chat messages.
     """
 
     def __init__(self):
-        self._messages: List[Message] = []
+        os.makedirs("agent_app", exist_ok=True)
+        self._init_db()
 
-    # ----------------------------
-    # Basic operations
-    # ----------------------------
+    # ----------------------------------------------------
+    # Initialize DB
+    # ----------------------------------------------------
 
-    def add_user(self, text: str):
-        self._messages.append(Message(role="human", content=text))
+    def _init_db(self):
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS chat_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT,
+                    role TEXT,
+                    content TEXT,
+                    timestamp TEXT,
+                    tool_name TEXT
+                )
+                """
+            )
+            conn.commit()
 
-    def add_assistant(self, text: str):
-        self._messages.append(Message(role="assistant", content=text))
+    # ----------------------------------------------------
+    # Store Message
+    # ----------------------------------------------------
 
-    def add_tool(self, text: str):
-        self._messages.append(Message(role="tool", content=text))
+    def save_message(self, session_id: str, message: AgentMessage):
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                """
+                INSERT INTO chat_history (session_id, role, content, timestamp, tool_name)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    session_id,
+                    message.role,
+                    message.content,
+                    message.timestamp,
+                    message.tool_name,
+                ),
+            )
+            conn.commit()
 
-    # ----------------------------
-    # Retrieval
-    # ----------------------------
-    def get(self) -> List[Message]:
-        return list(self._messages)
+    # ----------------------------------------------------
+    # Retrieve history for one session
+    # ----------------------------------------------------
 
-    def last(self) -> Message | None:
-        return self._messages[-1] if self._messages else None
+    def get_history(self, session_id: str) -> List[Dict]:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT * FROM chat_history
+                WHERE session_id = ?
+                ORDER BY id ASC
+                """,
+                (session_id,),
+            ).fetchall()
 
-    def clear(self):
-        self._messages.clear()
+        return [dict(row) for row in rows]
 
-    # ----------------------------
-    # AgentState integration
-    # ----------------------------
-    def load_from_state(self, state: AgentState):
-        self._messages = list(state.messages)
+    # ----------------------------------------------------
+    # Retrieve all sessions
+    # ----------------------------------------------------
 
-    def apply_to_state(self, state: AgentState) -> AgentState:
-        state.messages = list(self._messages)
-        return state
+    def list_sessions(self) -> List[str]:
+        with sqlite3.connect(DB_PATH) as conn:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT session_id FROM chat_history
+                ORDER BY session_id ASC
+                """
+            ).fetchall()
 
-    # ----------------------------
-    # LLM-friendly formatting
-    # ----------------------------
-    def as_llm_messages(self) -> List[dict]:
-        """
-        Convert into messages compatible with LangChain LLMs:
-        [
-            {"role": "user", "content": "..."},
-            {"role": "assistant", "content": "..."}
-        ]
-        """
-        mapped = []
-        for m in self._messages:
-            role_map = {
-                "human": "user",
-                "assistant": "assistant",
-                "tool": "tool",
-            }
-            mapped.append({
-                "role": role_map.get(m.role, m.role),
-                "content": m.content
-            })
-        return mapped
+        return [row[0] for row in rows]
+
+    # ----------------------------------------------------
+    # Delete session history
+    # ----------------------------------------------------
+
+    def delete_session(self, session_id: str):
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "DELETE FROM chat_history WHERE session_id = ?", (session_id,)
+            )
+            conn.commit()
+
+    # ----------------------------------------------------
+    # Wipe all history
+    # ----------------------------------------------------
+
+    def clear_all(self):
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("DELETE FROM chat_history")
+            conn.commit()
+
+
+# --------------------------------------------------------
+# Singleton Export
+# --------------------------------------------------------
+
+history_store = HistoryStore()

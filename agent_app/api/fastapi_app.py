@@ -1,117 +1,140 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import Optional, Dict, Any
 import uuid
 
 from agent_app.core.agent_graph import AgentGraph
 from agent_app.core.state import AgentState
 from agent_app.core.audit_logger import audit_logger
 
-from agent_app.api.models import ChatRequest, ChatResponse
 
+app = FastAPI(title="MCP LangGraph Agent API")
 
-# ----------------------------------------------------------------------
-# FastAPI initialization
-# ----------------------------------------------------------------------
-app = FastAPI(
-    title="MCP LangGraph System",
-    description="API interface for LangGraph Agent + MCP Tools",
-    version="1.0.0"
-)
+# ------------------------------------------------------------
+# CORS (Postman, Streamlit UI, Web Apps)
+# ------------------------------------------------------------
 
-
-# ----------------------------------------------------------------------
-# CORS
-# ----------------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],          # Customize for production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# ------------------------------------------------------------
+# Global Session State Store
+# ------------------------------------------------------------
 
-# ----------------------------------------------------------------------
-# Global in-memory session store
-# ----------------------------------------------------------------------
-SESSION_STORE = {}
+SESSION_STORE: Dict[str, AgentState] = {}
 
-# Create a single agent instance for all API calls
 AGENT = AgentGraph(
     mcp_endpoint="python mcp_server/run_server.py",
-    model="llama3.2:latest"
+    model="llama3"
 )
 
+# ------------------------------------------------------------
+# Request / Response Models
+# ------------------------------------------------------------
 
-# ----------------------------------------------------------------------
-# Routes
-# ----------------------------------------------------------------------
-@app.get("/health")
-async def health_check():
-    return {"status": "ok", "message": "FastAPI server running."}
+class ChatRequest(BaseModel):
+    session_id: Optional[str] = None
+    user_input: str
 
+
+class ChatResponse(BaseModel):
+    session_id: str
+    final_response: Optional[str]
+    pending_tool_call: Optional[Dict[str, Any]]
+    tool_response: Optional[Any]
+    messages: list
+
+
+# ------------------------------------------------------------
+# (1) ORIGINAL ENDPOINT YOU REFERENCED
+# ------------------------------------------------------------
 
 @app.post("/chat/completion", response_model=ChatResponse)
-async def chat_completion(payload: ChatRequest):
+async def chat_completion(request: ChatRequest):
     """
-    Main entrypoint for programmatic chat.
-    Handles multiple-turn conversations per session.
+    This matches the earlier version I shared.
+    Works identically to /chat — just a different route.
     """
 
-    # Create session if needed
-    if payload.session_id is None:
-        session_id = str(uuid.uuid4())
-        SESSION_STORE[session_id] = AgentState(session_id=session_id)
-    else:
-        session_id = payload.session_id
-        if session_id not in SESSION_STORE:
-            SESSION_STORE[session_id] = AgentState(session_id=session_id)
+    # Load or create session
+    session_id = request.session_id or str(uuid.uuid4())
+    state = SESSION_STORE.get(session_id) or AgentState(session_id=session_id)
 
-    state = SESSION_STORE[session_id]
-
-    # Run agent
-    result_state = await AGENT.arun(
+    # Execute one agent turn
+    new_state = await AGENT.arun(
         session_id=session_id,
-        user_input=payload.message,
+        user_input=request.user_input,
         prior_state=state
     )
 
-    # Save updated session
-    SESSION_STORE[session_id] = result_state
+    # Save updated state
+    SESSION_STORE[session_id] = new_state
 
     return ChatResponse(
         session_id=session_id,
-        response=result_state.final_response,
-        messages=[m.model_dump() for m in result_state.messages]
+        final_response=new_state.final_response,
+        pending_tool_call=new_state.pending_tool_call,
+        tool_response=new_state.tool_response,
+        messages=[m.dict() for m in new_state.messages]
     )
 
 
+# ------------------------------------------------------------
+# (2) NEW SIMPLIFIED ENDPOINT
+# ------------------------------------------------------------
+
+@app.post("/chat", response_model=ChatResponse)
+async def chat(request: ChatRequest):
+    """
+    Identical to /chat/completion, but simpler URL.
+    """
+
+    session_id = request.session_id or str(uuid.uuid4())
+    state = SESSION_STORE.get(session_id) or AgentState(session_id=session_id)
+
+    new_state = await AGENT.arun(
+        session_id=session_id,
+        user_input=request.user_input,
+        prior_state=state
+    )
+
+    SESSION_STORE[session_id] = new_state
+
+    return ChatResponse(
+        session_id=session_id,
+        final_response=new_state.final_response,
+        pending_tool_call=new_state.pending_tool_call,
+        tool_response=new_state.tool_response,
+        messages=[m.dict() for m in new_state.messages]
+    )
+
+
+# ------------------------------------------------------------
+# Retrieve Full Session State
+# ------------------------------------------------------------
+
+@app.get("/state/{session_id}")
+def get_state(session_id: str):
+    state = SESSION_STORE.get(session_id)
+    if not state:
+        return {"error": "Invalid session_id"}
+    return state.dict()
+
+
+# ------------------------------------------------------------
+# Audit Log Endpoint
+# ------------------------------------------------------------
+
 @app.get("/tools/logs")
-async def list_tool_logs(session_id: str | None = None, limit: int = 50):
-    """
-    Retrieve audit logs for debugging, analytics, and observability.
-    """
+def tool_logs(session_id: Optional[str] = None, limit: int = 50):
     logs = audit_logger.list_logs(session_id=session_id, limit=limit)
-    return {"count": len(logs), "logs": logs}
-
-
-@app.get("/mcp/tools/list")
-async def mcp_list_tools():
-    """
-    Simple debugging endpoint to ask MCP server for its tool list.
-    Useful for Postman or CI-based validation.
-    """
-    from langchain_mcp_adapters.client import load_mcp_tools, create_session
-    from langchain_mcp_adapters.sessions import StdioConnection
-
-    connection: StdioConnection = {
-        "transport": "stdio",
-        "command": "python",
-        "args": ["-m", "mcp_server.run_server"],
+    return {
+        "count": len(logs),
+        "logs": logs
     }
-
-    async for session in create_session(connection):
-        tools = await load_mcp_tools(session, connection=connection)
-        return {
-            "tools": [{"name": tool.name, "description": tool.description} for tool in tools]
-        }

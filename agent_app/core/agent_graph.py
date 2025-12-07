@@ -1,115 +1,129 @@
-import asyncio
-from typing import Optional, Dict, Any
+"""
+Agent Graph Builder for MCP + LangGraph Agent
+----------------------------------------------
 
+This module constructs the full LangGraph workflow:
+
+   user → llm → router → tools → router → llm → ... → done
+
+Nodes:
+ - LLMNode: produces assistant replies or tool calls
+ - RouterNode: decides next step
+ - MCPToolNode: executes tools from MCP server
+ - Done node: final output return
+
+The AgentGraph class exposes:
+ - arun(): async execution of one agent turn
+ - run(): sync wrapper (used by Streamlit + FastAPI)
+"""
+
+import asyncio
 from langgraph.graph import StateGraph, END
 
-from .state import AgentState, append_user_message
-from .nodes.router_node import RouterNode
-from .nodes.llm_node import LLMNode
-from .nodes.tool_node import ToolNode
+from agent_app.core.state import AgentState
+from agent_app.core.nodes.llm_node import LLMNode
+from agent_app.core.nodes.router_node import RouterNode
+from agent_app.core.nodes.tool_node import MCPToolNode
+
+from langchain_community.chat_models import ChatOllama
 
 
 class AgentGraph:
-    """
-    This class builds and runs the LangGraph agent.
 
-    Nodes:
-      - router   → determines whether to use LLM or tool next
-      - llm      → generates assistant response
-      - tool     → executes MCP tool and returns results
-
-    Flow:
-        user_input → router → (llm | tool) → router → ... → llm → done
-    """
-
-    def __init__(
-        self,
-        mcp_endpoint: str = "python mcp_server/run_server.py",
-        model: str = "llama3.2:latest"
-    ):
-        # Instantiate nodes
-        self.router = RouterNode()
-        self.llm_node = LLMNode(model=model)
-        self.tool_node = ToolNode(mcp_endpoint=mcp_endpoint)
-
-        # Build graph
-        self._graph = self._build_graph()
-
-    # ----------------------------------------------------------------------
-    # Build LangGraph structure
-    # ----------------------------------------------------------------------
-    def _build_graph(self):
-        graph = StateGraph(AgentState)
-
-        # Register nodes
-        graph.add_node("router", self.router.run)
-        graph.add_node("llm", self.llm_node.run)
-        graph.add_node("tool", self.tool_node.run)
-
-        # Define routing edges
-        graph.add_edge("router", "llm")
-        graph.add_edge("router", "tool")
-
-        graph.add_edge("tool", "router")
-        graph.add_edge("llm", END)
-
-        # Graph entry point
-        graph.set_entry_point("router")
-
-        return graph.compile()
-
-    # ----------------------------------------------------------------------
-    # High-level agent entrypoints
-    # ----------------------------------------------------------------------
-    async def arun(
-        self,
-        session_id: str,
-        user_input: str,
-        prior_state: Optional[AgentState] = None
-    ) -> AgentState:
+    def __init__(self, mcp_endpoint: str, model: str = "llama3"):
         """
-        Async agent execution (main method).
-
-        Args:
-            session_id (str): UI/API session identifier
-            user_input (str): user query
-            prior_state (AgentState): previous conversation context
-
-        Returns:
-            AgentState after full graph execution
+        Build the LangGraph agent with:
+         - LLM node
+         - Router node
+         - MCP ToolNode
         """
 
-        # Initialize state if first turn
-        if prior_state is None:
-            state = AgentState(session_id=session_id)
-        else:
-            state = prior_state
+        # -------------------------------------------------------
+        # Initialize LLM
+        # -------------------------------------------------------
+        llm = ChatOllama(
+            model=model,
+            temperature=0.2,
+            stream=False
+        )
 
-        # Add the user message
-        append_user_message(state, user_input)
+        self.llm_node = LLMNode(llm)
+        self.router_node = RouterNode()
+        self.tools_node = MCPToolNode(mcp_command=mcp_endpoint)
 
-        # Execute LangGraph
+        # -------------------------------------------------------
+        # Build LangGraph
+        # -------------------------------------------------------
+        builder = StateGraph(AgentState)
+
+        builder.add_node("llm", self.llm_node)
+        builder.add_node("router", self.router_node)
+        builder.add_node("tools", self.tools_node)
+        builder.add_node("done", lambda state: state)
+
+        # Edges: LLM → Router
+        builder.add_edge("llm", "router")
+
+        # Edges: Tools → Router
+        builder.add_edge("tools", "router")
+
+        # Router → LLM
+        builder.add_conditional_edges(
+            "router",
+            lambda o: o["next"],
+            {
+                "llm": "llm",
+                "tools": "tools",
+                "done": "done",
+            }
+        )
+
+        # Graph start node
+        builder.set_entry_point("llm")
+
+        self._graph = builder.compile()
+
+    # -------------------------------------------------------------------
+    # Public API
+    # -------------------------------------------------------------------
+
+    async def arun(self, session_id: str, user_input: str,
+                   prior_state: AgentState | None = None) -> AgentState:
+        """
+        Run one agent step asynchronously.
+
+        The AgentState carries:
+         - messages
+         - tool responses
+         - pending tool calls
+         - final response
+        """
+
+        # Restore or initialize session state
+        state = prior_state or AgentState(session_id=session_id)
+
+        # Inject user input
+        state.user_input = user_input
+
+        # Execute graph
         result_state = await self._graph.ainvoke(state)
 
         return result_state
 
-    # ----------------------------------------------------------------------
-    # Sync wrapper (Streamlit safe)
-    # ----------------------------------------------------------------------
-    def run(
-        self,
-        session_id: str,
-        user_input: str,
-        prior_state: Optional[AgentState] = None
-    ) -> AgentState:
+    def run(self, session_id: str, user_input: str,
+            prior_state: AgentState | None = None) -> AgentState:
+        """
+        Sync wrapper around arun().
+        Used by Streamlit and sometimes FastAPI.
+        """
 
         try:
             loop = asyncio.get_running_loop()
-            # If inside Streamlit event loop → run as task
-            coro = self.arun(session_id, user_input, prior_state)
-            return loop.run_until_complete(coro)
+            return loop.run_until_complete(
+                self.arun(session_id, user_input, prior_state)
+            )
         except RuntimeError:
-            # No running loop → create one
+            # No event loop running — normal case for Streamlit
             return asyncio.run(
                 self.arun(session_id, user_input, prior_state)
             )

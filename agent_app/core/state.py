@@ -1,72 +1,93 @@
-from typing import List, Optional, Any, Dict
+"""
+Agent State for LangGraph + MCP Agent
+-------------------------------------
+
+This module defines the full AgentState object used by the graph.
+
+The state stores:
+ - Session ID
+ - Message history
+ - Pending tool call (from LLM)
+ - Tool response (fed back into LLM)
+ - Intermediate steps (for debugging + audit)
+ - Final response (for Router → Done)
+
+This class is a Pydantic model so it works cleanly with LangGraph.
+"""
+
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
+from datetime import datetime
 
 
-class Message(BaseModel):
-    """Represents a message in the conversation history."""
-    role: str   # "human", "assistant", "tool"
+# ============================================================
+# Message Object (used inside message list)
+# ============================================================
+
+class AgentMessage(BaseModel):
+    role: str  # "human", "assistant", or "tool"
     content: str
+    timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+    tool_name: Optional[str] = None  # Only set for tool messages
 
 
-class ToolCallRecord(BaseModel):
-    """Represents a single tool invocation for audit logging."""
-    tool_name: str
-    arguments: Dict[str, Any]
+# ============================================================
+# Intermediate Steps (tool calls + results)
+# ============================================================
+
+class IntermediateStep(BaseModel):
+    tool: str
+    args: Dict[str, Any]
     result: Any
+    timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
 
+
+# ============================================================
+# Agent State Model (central model for LangGraph)
+# ============================================================
 
 class AgentState(BaseModel):
     """
-    LangGraph agent state container.
-
-    This flows through each node in the graph:
-      - router_node decides what to do next
-      - llm_node generates text
-      - tool_node executes MCP tools
+    The state that flows through each node in the LangGraph workflow.
     """
 
-    messages: List[Message] = Field(default_factory=list)
-    tool_calls: List[ToolCallRecord] = Field(default_factory=list)
+    # Session
+    session_id: str
 
-    # The "result" is set when the agent is ready to reply back to UI/API
+    # Chat history
+    messages: List[AgentMessage] = Field(default_factory=list)
+
+    # Raw user input for this turn
+    user_input: Optional[str] = None
+
+    # LLM → Tool call request
+    pending_tool_call: Optional[Dict[str, Any]] = None
+
+    # Tool → LLM result
+    tool_response: Optional[Any] = None
+
+    # History of tool invocations
+    intermediate_steps: List[IntermediateStep] = Field(default_factory=list)
+
+    # Final head response (Router → Done)
     final_response: Optional[str] = None
 
-    # LangGraph internal field for tracking progress
-    next_step: Optional[str] = None
+    # --------------------------------------------------------
+    # Helper to append messages
+    # --------------------------------------------------------
 
-    # Session ID (UI sessions or FastAPI context)
-    session_id: Optional[str] = None
-
-    model_config = {
-        "arbitrary_types_allowed": True
-    }
-
-
-def append_user_message(state: AgentState, text: str) -> AgentState:
-    """Helper: append a human message."""
-    state.messages.append(Message(role="human", content=text))
-    return state
-
-
-def append_assistant_message(state: AgentState, text: str) -> AgentState:
-    """Helper: append an assistant message."""
-    state.messages.append(Message(role="assistant", content=text))
-    return state
-
-
-def record_tool_call(
-    state: AgentState,
-    tool_name: str,
-    args: Dict[str, Any],
-    result: Any
-) -> AgentState:
-    """Record tool usage into state (audited separately)."""
-
-    state.tool_calls.append(
-        ToolCallRecord(
-            tool_name=tool_name,
-            arguments=args,
-            result=result
+    def new_message(
+        self,
+        role: str,
+        content: str,
+        tool_name: Optional[str] = None
+    ) -> AgentMessage:
+        """
+        Create and return a new AgentMessage.
+        Note: State tracking is managed by the caller.
+        """
+        return AgentMessage(
+            role=role,
+            content=content,
+            tool_name=tool_name
         )
-    )
-    return state

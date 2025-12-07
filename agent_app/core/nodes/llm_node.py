@@ -1,56 +1,109 @@
-from typing import Dict, Any, List
+"""
+LLM Node for LangGraph Agent
+----------------------------
 
-from langchain_ollama import ChatOllama
-from langchain_core.messages import HumanMessage, AIMessage
+This node is responsible for:
+ - Producing assistant responses
+ - Generating structured tool call instructions
+ - Incorporating tool responses
+ - Updating the AgentState messages list
 
-from ..state import AgentState, append_assistant_message
+The node uses the LangChain ChatModel with tool calling enabled.
+"""
+
+from typing import Dict, Any
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+
+from agent_app.core.state import AgentState
 
 
 class LLMNode:
     """
-    LLM node that generates assistant responses using Ollama.
-
-    The node:
-      - Reads conversation messages from AgentState
-      - Converts them to LangChain message objects
-      - Calls ChatOllama to generate a reply
-      - Appends result to AgentState.messages
-      - Writes the final LLM output into state.final_response
+    Wrapper for an LLM that:
+      - Accepts AgentState (history + context)
+      - Produces assistant messages or tool-call instructions
+      - Returns updated AgentState
     """
 
-    def __init__(self, model: str = "llama3.2:latest"):
-        self.llm = ChatOllama(
-            model=model,
-            temperature=0.2,
+    def __init__(self, llm):
+        self.llm = llm  # ChatModel (Ollama, OpenAI, etc.)
+
+    async def __call__(self, state: AgentState) -> AgentState:
+        """
+        Executes an LLM prediction step.
+        """
+
+        # ----------------------------------------------------
+        # 1. Construct message history for the LLM
+        # ----------------------------------------------------
+
+        messages = []
+
+        for msg in state.messages:
+            if msg.role == "human":
+                messages.append(HumanMessage(content=msg.content))
+            elif msg.role == "assistant":
+                messages.append(AIMessage(content=msg.content))
+            elif msg.role == "tool":
+                messages.append(
+                    ToolMessage(
+                        name=msg.tool_name,
+                        content=msg.content
+                    )
+                )
+
+        # Last user input
+        messages.append(HumanMessage(content=state.user_input))
+
+        # Include tool result if present
+        if state.tool_response is not None:
+            messages.append(
+                ToolMessage(
+                    name="tool_result",
+                    content=str(state.tool_response)
+                )
+            )
+
+        # ----------------------------------------------------
+        # 2. Call LLM model
+        # ----------------------------------------------------
+
+        response = await self.llm.ainvoke(messages)
+
+        # ----------------------------------------------------
+        # 3. Check for a tool call
+        # ----------------------------------------------------
+
+        if response.tool_calls:
+            # LLM requested a tool
+            tool_call = response.tool_calls[0]
+
+            state.pending_tool_call = {
+                "name": tool_call["name"],
+                "args": tool_call["args"],
+            }
+
+            # Record the assistant message that invoked tool
+            state.messages.append(
+                state.new_message(
+                    role="assistant",
+                    content=f"[TOOL CALL] {tool_call['name']} → {tool_call['args']}"
+                )
+            )
+
+            return state
+
+        # ----------------------------------------------------
+        # 4. No tool call → produce normal assistant response
+        # ----------------------------------------------------
+
+        assistant_text = response.content
+
+        state.messages.append(
+            state.new_message(role="assistant", content=assistant_text)
         )
 
-    # ------------------------------------------------------
-    # Convert AgentState messages to LangChain LLM messages
-    # ------------------------------------------------------
-    def _convert_messages(self, state: AgentState) -> List[Any]:
-        converted = []
-        for m in state.messages:
-            if m.role == "human":
-                converted.append(HumanMessage(content=m.content))
-            else:
-                # "assistant" or "tool" both appear as AIMessage to model
-                converted.append(AIMessage(content=m.content))
-        return converted
-
-    # ------------------------------------------------------
-    # Main LLM node execution
-    # ------------------------------------------------------
-    async def run(self, state: AgentState) -> AgentState:
-        messages = self._convert_messages(state)
-
-        # Call Ollama LLM
-        reply = await self.llm.ainvoke(messages)
-
-        response_text = reply.content
-        append_assistant_message(state, response_text)
-
-        # Set final result of this LLM turn
-        state.final_response = response_text
-        state.next_step = "done"
+        # Mark final output so router knows when to stop
+        state.final_response = assistant_text
 
         return state
