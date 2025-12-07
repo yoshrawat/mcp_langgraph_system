@@ -1,53 +1,56 @@
-from typing import List, Dict, Any
+from typing import List
+from pydantic import BaseModel, Field
 
-from langchain_ollama import OllamaEmbeddings
-
-from ..vector_store.chroma_store import get_chroma
-
-# Shared embedding model (same space as index)
-_embeddings = OllamaEmbeddings(model="nomic-embed-text")
+# from mcp_server.vectorstore.chroma_store import ChromaVectorStore
+from mcp_server.vector_store.chroma_store import ChromaVectorStore
 
 
-async def rag_query_tool(query: str, k: int = 3) -> Dict[str, Any]:
+# ---------------------------------------------------------
+# INPUT / OUTPUT SCHEMAS
+# ---------------------------------------------------------
+
+class RAGQueryInput(BaseModel):
+    query: str = Field(..., description="User question to query using embeddings.")
+    namespace: str = Field(default="default")
+    k: int = Field(default=5, description="Number of results to return.")
+
+
+class RAGQueryOutput(BaseModel):
+    matches: List[dict]
+    namespace: str
+    query: str
+
+
+# ---------------------------------------------------------
+# TOOL IMPLEMENTATION
+# ---------------------------------------------------------
+
+async def rag_query_tool(input: RAGQueryInput) -> RAGQueryOutput:
     """
-    Run a semantic similarity search in ChromaDB.
-
-    Args:
-        query (str): User question or search phrase.
-        k (int): Number of top matches to return. Default = 3.
-
-    Returns:
-        dict: {
-            "query": "...",
-            "k": 3,
-            "matches": [
-                {
-                    "content": "...",
-                    "metadata": {...},
-                    "score": <float>
-                }
-            ]
-        }
+    Perform vector similarity search in ChromaDB.
     """
 
-    if not query:
-        return {"matches": [], "message": "Empty query provided."}
+    store = ChromaVectorStore(namespace=input.namespace)
 
-    chroma = get_chroma()
+    docs = await store.query(
+        query=input.query,
+        k=input.k
+    )
 
-    # Perform similarity search
-    results = chroma.similarity_search_with_score(query, k=k)
+    return RAGQueryOutput(
+        matches=docs,
+        namespace=input.namespace,
+        query=input.query
+    )
 
-    formatted = []
-    for doc, score in results:
-        formatted.append({
-            "content": doc.page_content,
-            "metadata": doc.metadata,
-            "score": float(score)
-        })
 
-    return {
-        "query": query,
-        "k": k,
-        "matches": formatted
-    }
+# ---------------------------------------------------------
+# SCHEMA EXPOSURE HELPERS
+# ---------------------------------------------------------
+
+def input_schema():
+    return RAGQueryInput.model_json_schema()
+
+
+def output_schema():
+    return RAGQueryOutput.model_json_schema()

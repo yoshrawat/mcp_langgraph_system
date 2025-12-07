@@ -1,44 +1,77 @@
-import httpx
+import aiohttp
+import json
+from typing import Optional, Dict, Any
+from pydantic import BaseModel, Field
 
 
-async def api_fetch_tool(url: str, timeout: int = 10) -> dict:
+# ---------------------------------------------------------
+# Pydantic Schemas
+# ---------------------------------------------------------
+
+class ApiFetchInput(BaseModel):
+    url: str = Field(..., description="Full URL of the public API endpoint.")
+    params: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Optional query parameters."
+    )
+
+
+class ApiFetchOutput(BaseModel):
+    status: int
+    data: Any
+    error: Optional[str] = None
+
+
+# ---------------------------------------------------------
+# Tool Handler
+# ---------------------------------------------------------
+
+async def fetch_api_data_tool(input: ApiFetchInput) -> ApiFetchOutput:
     """
-    Fetch data from a remote API endpoint.
-
-    Args:
-        url (str): The remote endpoint to fetch.
-        timeout (int): Timeout in seconds (default: 10)
-
-    Returns:
-        dict: A dictionary containing response status, text, headers, JSON if available.
-
-    This tool is frequently used for:
-      - RAG ingestion
-      - API testing
-      - Agent tool execution
+    Generic API fetch tool for MCP.
+    Fetches a public API URL using aiohttp and returns JSON.
     """
 
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        try:
-            response = await client.get(url)
-            raw_text = response.text
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(input.url, params=input.params, timeout=15) as resp:
+                status = resp.status
 
-            # Try parsing JSON (best-effort)
-            try:
-                json_body = response.json()
-            except Exception:
-                json_body = None
+                # Try parsing JSON response
+                try:
+                    data = await resp.json()
+                except Exception:
+                    # Fallback to text if it's not JSON
+                    data = await resp.text()
 
-            return {
-                "url": url,
-                "status_code": response.status_code,
-                "headers": dict(response.headers),
-                "text": raw_text,
-                "json": json_body,
-            }
+                if status >= 400:
+                    return ApiFetchOutput(
+                        status=status,
+                        data=data,
+                        error=f"HTTP error {status}"
+                    )
 
-        except httpx.RequestError as exc:
-            return {
-                "error": f"Failed to fetch URL: {url}",
-                "reason": str(exc),
-            }
+                return ApiFetchOutput(
+                    status=status,
+                    data=data,
+                    error=None
+                )
+
+    except Exception as e:
+        return ApiFetchOutput(
+            status=500,
+            data=None,
+            error=str(e)
+        )
+
+
+# ---------------------------------------------------------
+# Schema Exposure Helpers
+# ---------------------------------------------------------
+
+def input_schema():
+    return ApiFetchInput.model_json_schema()
+
+
+def output_schema():
+    return ApiFetchOutput.model_json_schema()

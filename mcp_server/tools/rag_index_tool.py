@@ -1,71 +1,62 @@
-from typing import List, Dict
+from typing import Optional, List
+from pydantic import BaseModel, Field
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_ollama import OllamaEmbeddings
-
-from ..vector_store.chroma_store import get_chroma
-
-
-# Embedding model (shared)
-_embeddings = OllamaEmbeddings(model="nomic-embed-text")
+# from mcp_server.vectorstore.chroma_store import ChromaVectorStore
+from mcp_server.vector_store.chroma_store import ChromaVectorStore
 
 
-async def rag_index_tool(docs: List[Dict[str, str]]) -> dict:
-    """
-    Index documents into ChromaDB using Ollama embeddings.
+# ---------------------------------------------------------
+# INPUT / OUTPUT SCHEMAS
+# ---------------------------------------------------------
 
-    Args:
-        docs (list): Items like:
-            {
-                "id": "...",
-                "content": "...",
-                "source": "api" | "ui" | ...
-            }
-
-    Workflow:
-        - Split docs into small chunks
-        - Embed using Ollama ("nomic-embed-text")
-        - Store into persistent Chroma database
-
-    Returns:
-        {"indexed": <num_chunks>}
-    """
-
-    if not docs:
-        return {"indexed": 0, "message": "No docs provided."}
-
-    chroma = get_chroma()
-
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=50
+class RAGIndexInput(BaseModel):
+    texts: List[str] = Field(..., description="List of text chunks to embed and store.")
+    metadatas: Optional[List[dict]] = Field(
+        default=None,
+        description="Optional metadata per chunk."
+    )
+    namespace: str = Field(
+        default="default",
+        description="Namespace / collection name for Chroma persistence."
     )
 
-    texts = []
-    metadatas = []
 
-    for doc in docs:
-        content = doc.get("content")
-        if not content:
-            continue
+class RAGIndexOutput(BaseModel):
+    success: bool
+    stored_count: int
+    namespace: str
 
-        # Split into chunks
-        chunks = splitter.split_text(content)
 
-        for chunk in chunks:
-            texts.append(chunk)
-            metadatas.append({
-                "source": doc.get("source", "unknown"),
-                "doc_id": doc.get("id"),
-            })
+# ---------------------------------------------------------
+# TOOL IMPLEMENTATION
+# ---------------------------------------------------------
 
-    if not texts:
-        return {"indexed": 0, "message": "No chunkable text found."}
+async def rag_index_tool(input: RAGIndexInput) -> RAGIndexOutput:
+    """
+    Index text into ChromaDB using Ollama embeddings.
+    """
 
-    # Persist into Chroma
-    chroma.add_texts(texts=texts, metadatas=metadatas)
+    store = ChromaVectorStore(namespace=input.namespace)
 
-    return {
-        "indexed": len(texts),
-        "message": f"Indexed {len(texts)} text chunks into Chroma."
-    }
+    count = await store.add_texts(
+        texts=input.texts,
+        metadatas=input.metadatas
+    )
+
+    return RAGIndexOutput(
+        success=True,
+        stored_count=count,
+        namespace=input.namespace
+    )
+
+
+# ---------------------------------------------------------
+# SCHEMA EXPOSURE HELPERS
+# ---------------------------------------------------------
+
+def input_schema():
+    return RAGIndexInput.model_json_schema()
+
+
+def output_schema():
+    return RAGIndexOutput.model_json_schema()

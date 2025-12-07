@@ -1,12 +1,46 @@
-"""
-Health check tool for MCP server.
+from datetime import datetime
+from typing import Optional
+from pydantic import BaseModel
 
-This tool is intentionally simple and synchronous-safe.
-LangChain MCP adapter supports async tools, so this follows async signature.
-"""
 
-async def health_tool() -> dict:
-    return {
-        "status": "ok",
-        "message": "MCP server alive and operational."
-    }
+# ---------------------------------------------------------
+# Pydantic Schemas
+# ---------------------------------------------------------
+
+class HealthToolInput(BaseModel):
+    """Health check tool requires no input."""
+    pass
+
+
+class HealthToolOutput(BaseModel):
+    status: str
+    timestamp: str
+    detail: Optional[str] = None
+
+
+# ---------------------------------------------------------
+# Tool Handler
+# ---------------------------------------------------------
+
+async def health_check_tool(_: HealthToolInput) -> HealthToolOutput:
+    """
+    A simple health check tool that returns server status.
+    """
+
+    return HealthToolOutput(
+        status="ok",
+        timestamp=datetime.utcnow().isoformat(),
+        detail="MCP server alive and operational"
+    )
+
+
+# ---------------------------------------------------------
+# Schema Exposure Helpers
+# ---------------------------------------------------------
+
+def input_schema():
+    return HealthToolInput.model_json_schema()
+
+
+def output_schema():
+    return HealthToolOutput.model_json_schema()
