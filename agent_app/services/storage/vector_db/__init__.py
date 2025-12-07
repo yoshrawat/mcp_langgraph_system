@@ -1,3 +1,0 @@
-"""
-Vector DB backend package.
-"""

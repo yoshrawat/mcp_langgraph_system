@@ -1,0 +1,16 @@
+FROM python:3.13-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y \
+    curl \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY ./mcp_server /app/mcp_server
+COPY ./pyproject.toml /app/
+COPY ./requirements.txt /app/
+
+RUN pip install --no-cache-dir -r requirements.txt
+
+ENTRYPOINT ["python", "mcp_server/run_server.py"]

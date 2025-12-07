@@ -1,0 +1,123 @@
+{
+  "info": {
+    "name": "MCP LangGraph System",
+    "_postman_id": "b1820c0c-e18b-4454-9504-ff1db76d8080",
+    "description": "Postman collection for testing the MCP LangGraph Agent + FastAPI backend.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/health"
+      }
+    },
+    {
+      "name": "Readiness Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/ready"
+      }
+    },
+    {
+      "name": "List MCP Tools",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/mcp/tools/list"
+      }
+    },
+    {
+      "name": "Chat Completion (Single Turn)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "// Store session_id dynamically for multi-turn conversations",
+              "var jsonData = pm.response.json();",
+              "if (jsonData.session_id) {",
+              "    pm.environment.set('session_id', jsonData.session_id);",
+              "    console.log('Stored session_id:', jsonData.session_id);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"message\": \"hello agent\"\n}"
+        },
+        "url": "{{base_url}}/chat/completion"
+      }
+    },
+    {
+      "name": "Chat Completion (Multi-Turn)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "// Keep updating session_id",
+              "var jsonData = pm.response.json();",
+              "if (jsonData.session_id) {",
+              "    pm.environment.set('session_id', jsonData.session_id);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"session_id\": \"{{session_id}}\",\n  \"message\": \"search github api\"\n}"
+        },
+        "url": "{{base_url}}/chat/completion"
+      }
+    },
+    {
+      "name": "Tool Logs",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/tools/logs?session_id={{session_id}}&limit=50",
+          "host": ["{{base_url}}"],
+          "path": ["tools", "logs"],
+          "query": [
+            {
+              "key": "session_id",
+              "value": "{{session_id}}"
+            },
+            {
+              "key": "limit",
+              "value": "50"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "event": [],
+  "variable": []
+}

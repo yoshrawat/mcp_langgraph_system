@@ -1,1 +1,0 @@
-# Vector DB repo stub
